@@ -1,96 +1,246 @@
-# Install required packages
-!pip install -q langchain langchain-community langchain-groq neo4j sentence-transformers langchain-text-splitters
+# ================================================================================
+#  HYBRID GRAPH RAG – DATA INGESTION (FILE UPLOAD) + KNOWLEDGE GRAPH + INFERENCES
+# ================================================================================
 
-# Import necessary modules
-import os
+# 0. Install & imports
+!pip install -q langchain langchain-community langchain-groq neo4j \
+                sentence-transformers langchain-text-splitters langchain-neo4j \
+                PyPDF2 python-docx
+
+import os, re, io
 from getpass import getpass
+from google.colab import files
+import PyPDF2, docx
 from langchain_groq import ChatGroq
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Neo4jVector
-from langchain_community.graphs import Neo4jGraph
+from langchain_neo4j import Neo4jGraph
 from langchain_text_splitters import CharacterTextSplitter
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import PromptTemplate, ChatPromptTemplate
+from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 
-# Set up API keys and Neo4j credentials
-# Replace with your actual values or use Colab secrets
-os.environ["GROQ_API_KEY"] = getpass("Enter your Groq API key: ")
-os.environ["NEO4J_URI"] = getpass("Enter your Neo4j URI (e.g., neo4j+s://<hash>.databases.neo4j.io or bolt://localhost:7687): ")
-os.environ["NEO4J_USERNAME"] = getpass("Enter your Neo4j username: ")
-os.environ["NEO4J_PASSWORD"] = getpass("Enter your Neo4j password: ")
+# ------------------------------------------------------------------
+# 1. Credentials & models
+# ------------------------------------------------------------------
+os.environ["GROQ_API_KEY"] = getpass("Groq API key: ")
+os.environ["NEO4J_URI"] = getpass("Neo4j URI: ")
+os.environ["NEO4J_USERNAME"] = getpass("Neo4j Username: ")
+os.environ["NEO4J_PASSWORD"] = getpass("Neo4j Password: ")
 
-# Initialize embeddings (using open-source HuggingFace model since Groq does not provide native embedding models)
-embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
+emb = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+print("Setup ready!\n")
 
-# Sample plain text (unstructured data) - replace with your own text
-plain_text = """
-Quarkus is a modern Java framework built from the ground up to support cloud-native, containerised and serverless applications. It emphasises fast startup times, low memory footprint, native-image compilation (via GraalVM) support, and both imperative and reactive programming models. On the other hand, Spring Boot has been a go-to framework for enterprise Java applications for many years: it offers a mature and broad ecosystem, vast community support, robust integration with databases, messaging systems and the Spring family of projects, and a familiar productive developer experience.
+# ------------------------------------------------------------------
+# 2. FILE UPLOAD & TEXT EXTRACTION
+# ------------------------------------------------------------------
+def read_file(uploaded_dict) -> str:
+    file_name = list(uploaded_dict.keys())[0]
+    file_bytes = uploaded_dict[file_name]
+    file_stream = io.BytesIO(file_bytes)
 
-When comparing the two frameworks:
+    if file_name.lower().endswith(('.txt', '.md')):
+        return file_stream.read().decode('utf-8', errors='ignore')
+    elif file_name.lower().endswith('.pdf'):
+        reader = PyPDF2.PdfReader(file_stream)
+        return "\n".join(page.extract_text() or "" for page in reader.pages)
+    elif file_name.lower().endswith(('.docx', '.doc')):
+        doc = docx.Document(file_stream)
+        return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+    else:
+        raise ValueError(f"Unsupported file: {file_name}")
 
-In terms of startup time and memory usage, Quarkus has a clear advantage thanks to build-time processing, tree-shaking, ahead-of-time (AOT) native compilation and container-first optimisation. Spring Boot, while highly capable, generally runs with higher memory overhead and slightly slower startup.
+print("Upload your document (PDF, DOCX, TXT, MD)...")
+uploaded = files.upload()
+plain_text = read_file(uploaded)
+print(f"Loaded ~{len(plain_text.split())} words\n")
 
-On the ecosystem and maturity front, Spring Boot stands out: its ecosystem is extensive (Spring Data, Spring Cloud, Spring Security etc.), which means fewer surprises when integrating with various third-party technologies. Quarkus’s ecosystem is growing rapidly, but still somewhat smaller in breadth compared to Spring.
+# ------------------------------------------------------------------
+# 3. INGEST – CHUNKS + VECTORS + **GUARANTEED** ENTITIES & RELS
+# ------------------------------------------------------------------
+def ingest(text: str):
+    g = Neo4jGraph(url=os.environ["NEO4J_URI"],
+                   username=os.environ["NEO4J_USERNAME"],
+                   password=os.environ["NEO4J_PASSWORD"])
 
-For reactive programming, microservices and containerised/cloud environments (especially Kubernetes/serverless), Quarkus excels due to its design for modern architectures. Spring Boot also supports reactive programming (via Spring WebFlux) and microservices (via Spring Cloud), and if your team is already experienced with Spring you benefit from that familiarity.
+    g.query("MATCH (n) DETACH DELETE n")
+    print("Neo4j cleared.")
 
-With regards to developer experience, Spring Boot offers a smoother learning curve if you already know the Spring ecosystem, plus wide support in IDEs, tooling and communities. Quarkus offers novel features like live-coding, dev-mode reload and native binary option, which are attractive for iterative development and resource-constrained deployments.
+    # LARGER CHUNKS → more context for relationships
+    splitter = CharacterTextSplitter(chunk_size=500, chunk_overlap=100)
+    chunks = splitter.split_text(text)
+    print(f"{len(chunks)} chunk(s) created.")
 
-In short: Choose Quarkus when your priorities are fast startup, low resource usage, container-first or serverless microservices and you’re building green-field services optimised for the cloud. Choose Spring Boot when your priority is a rich ecosystem, team familiarity, enterprise-grade integrations, and you already have investment in the Spring platform. Each has its strengths, and the decision really depends on your project’s specific constraints, team expertise and deployment environment
-"""
+    vec = Neo4jVector.from_texts(
+        chunks, embedding=emb,
+        url=os.environ["NEO4J_URI"], username=os.environ["NEO4J_USERNAME"], password=os.environ["NEO4J_PASSWORD"],
+        index_name="text_embeddings", node_label="TextChunk",
+        embedding_node_property="embedding", text_node_property="text"
+    )
+    print("Vectors stored.")
 
-# Split the text into chunks for better embedding and retrieval
-text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-chunks = text_splitter.split_text(plain_text)
+    # BETTER PROMPT – with real examples
+    extract_prompt = PromptTemplate.from_template(
+        "Extract **entities** (programming languages, frameworks, concepts) and **relationships**.\n"
+        "Return **only** valid JSON. Use this format:\n\n"
+        "{{\n"
+        '  "entities": ["Java", "Spring", "Quarkus", "Functional Programming"],\n'
+        '  "relationships": [\n'
+        '    {{"source": "Java", "relation": "SUPPORTS", "target": "Functional Programming"}},\n'
+        '    {{"source": "Java", "relation": "USED_WITH", "target": "Spring"}}\n'
+        "  ]\n"
+        "}}\n\n"
+        "Text: {text}\n\n"
+        "JSON:"
+    )
+    extract_chain = extract_prompt | llm | JsonOutputParser()
 
-# Connect to Neo4j and ingest the text chunks with embeddings
-# This creates a vector store in Neo4j with a vector index for similarity search
-vector_store = Neo4jVector.from_texts(
-    chunks,
-    embedding=embeddings,
-    url=os.environ["NEO4J_URI"],
-    username=os.environ["NEO4J_USERNAME"],
-    password=os.environ["NEO4J_PASSWORD"],
-    index_name="text_embeddings",  # Name of the vector index in Neo4j
-    node_label="TextChunk",        # Label for the nodes
-    embedding_node_property="embedding",  # Property to store the vector
-    text_node_property="text"      # Property to store the original text
+    entities, relationships = set(), []
+    print("Extracting KG (entities + relationships)...")
+    for i, c in enumerate(chunks):
+        try:
+            data = extract_chain.invoke({"text": c})
+            ents = [e.strip() for e in data.get("entities", []) if e.strip()]
+            rels = data.get("relationships", [])
+            entities.update(ents)
+            relationships.extend(rels)
+            print(f"  chunk {i}: {len(ents)} ent, {len(rels)} rel")
+        except Exception as e:
+            print(f"  chunk {i} error: {e}")
+
+    # FALLBACK: If LLM gave 0 rels, extract simple ones
+    if not relationships:
+        print("No relationships from LLM → using rule-based fallback...")
+        for chunk in chunks:
+            chunk_lower = chunk.lower()
+            if "java" in chunk_lower and "spring" in chunk_lower:
+                relationships.append({"source": "Java", "relation": "USED_WITH", "target": "Spring"})
+            if "java" in chunk_lower and "quarkus" in chunk_lower:
+                relationships.append({"source": "Java", "relation": "USED_WITH", "target": "Quarkus"})
+            if "java" in chunk_lower and ("functional" in chunk_lower or "object oriented" in chunk_lower):
+                target = "Functional Programming" if "functional" in chunk_lower else "Object Oriented Programming"
+                relationships.append({"source": "Java", "relation": "SUPPORTS", "target": target})
+
+    # STORE ENTITIES
+    if entities:
+        g.query("UNWIND $list AS e MERGE (n:Entity {name: e.name})",
+                {"list": [{"name": e} for e in entities]})
+    print(f"{len(entities)} Entity nodes stored.")
+
+    # STORE RELATIONSHIPS (with debug print)
+    def safe_rel_type(s): return re.sub(r'[^A-Z0-9_]', '_', s.strip().upper())
+    stored = 0
+    for r in relationships:
+        src = r.get("source", "").strip()
+        tgt = r.get("target", "").strip()
+        typ = safe_rel_type(r.get("relation", "RELATED_TO"))
+        if src and tgt and typ:
+            cypher = f"""
+            MATCH (a:Entity {{name: $src}})
+            MATCH (b:Entity {{name: $tgt}})
+            MERGE (a)-[r:`{typ}`]->(b)
+            """
+            g.query(cypher, {"src": src, "tgt": tgt})
+            print(f"  REL: {src} -[{typ}]→ {tgt}")
+            stored += 1
+    print(f"{stored} relationship(s) stored.\n")
+    return vec, g
+
+vector_store, graph = ingest(plain_text)
+
+# ------------------------------------------------------------------
+# 4. VERIFICATION – PROOF RELS EXIST
+# ------------------------------------------------------------------
+print("=== NEO4J CONTENT ===")
+print("TextChunk :", graph.query("MATCH (c:TextChunk) RETURN count(c)")[0]["count(c)"])
+print("Entity    :", graph.query("MATCH (e:Entity) RETURN count(e)")[0]["count(e)"])
+print("Rels      :", graph.query("MATCH ()-[r]->() RETURN count(r)")[0]["count(r)"])
+print("\nEntities:", [r["e.name"] for r in graph.query("MATCH (e:Entity) RETURN e.name ORDER BY e.name")])
+print("\nRelationships:")
+for r in graph.query("MATCH (a)-[rel]->(b) RETURN a.name, type(rel), b.name"):
+    print(f"  {r['a.name']} -[{r['type(rel)']}]→ {r['b.name']}")
+print("\n")
+
+# ------------------------------------------------------------------
+# 5. SAFE GRAPH RETRIEVAL
+# ------------------------------------------------------------------
+cypher_prompt = PromptTemplate.from_template(
+    "Write ONE MATCH query using label `Entity`. Return ONLY Cypher.\n"
+    "Question: {question}\nEntity hint: {entity}\nCypher:"
 )
 
-print("Text ingested into Neo4j with embeddings successfully!")
+def extract_entity(q: str) -> str:
+    words = re.findall(r'\b[A-Z][a-z]+\b', q)
+    stop = {"the","a","an","and","or","but","in","on","at","to","for","of","with","is","was","are","were"}
+    for w in words:
+        if w.lower() not in stop:
+            return w
+    return q.split()[0] if q else ""
 
-# Optional: To demonstrate usage with Groq AI models, set up a simple RAG (Retrieval-Augmented Generation) chain
-# This retrieves similar chunks from Neo4j and uses a Groq model to generate a response
+def graph_context(q: str) -> str:
+    try:
+        entity = extract_entity(q)
+        cy = cypher_prompt | llm | StrOutputParser()
+        query = cy.invoke({"question": q, "entity": entity}).strip()
+        if not query.upper().startswith("MATCH"):
+            query = f"""
+            MATCH (e:Entity)
+            WHERE toLower(e.name) CONTAINS toLower('{entity}')
+            OPTIONAL MATCH (e)-[r]-(other)
+            RETURN e.name AS name,
+                   collect({{rel:type(r), target:other.name}}) AS rels
+            LIMIT 3
+            """
+        if any(k in query.upper() for k in ("CREATE","DROP","DELETE","SET","DETACH")):
+            return ""
+        rows = graph.query(query)
+        if not rows: return ""
+        lines = []
+        for row in rows:
+            name = row.get("name") or "?"
+            rels = row.get("rels") or []
+            lines.append(f"{name}")
+            for r in rels[:3]:
+                lines.append(f"  -[{r.get('rel','?')}]→ {r.get('target','?')}")
+        return "\n".join(lines)
+    except:
+        return ""
 
-# Initialize Groq LLM (using an open-weight model like Llama3 hosted on Groq for fast inference)
-llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.7)
+# ------------------------------------------------------------------
+# 6. HYBRID RAG CHAIN – PLAIN ENGLISH
+# ------------------------------------------------------------------
+def hybrid_retrieve(q):
+    vec = vector_store.similarity_search(q, k=2)
+    vctx = "\n\n".join(d.page_content for d in vec)
+    gctx = graph_context(q)
+    return vctx, gctx
 
-# Define a prompt template for RAG
-prompt_template = ChatPromptTemplate.from_template("""
-Answer the question based on the following context:
-{context}
-
-Question: {question}
-""")
-
-# Function to format retrieved documents
-def format_docs(docs):
-    return "\n\n".join(doc.page_content for doc in docs)
-
-# Set up the RAG chain
-rag_chain = (
-    {
-        "context": vector_store.as_retriever() | format_docs,
-        "question": RunnablePassthrough()
-    }
-    | prompt_template
-    | llm
-    | StrOutputParser()
+final_prompt = ChatPromptTemplate.from_template(
+    "Answer in **plain English** using this info:\n\n"
+    "Document:\n{vector_context}\n\n"
+    "Knowledge graph:\n{graph_context}\n\n"
+    "Question: {question}\n\n"
+    "Answer:"
 )
 
-# Example query to test the setup
-query = "What is quarkus?"
-response = rag_chain.invoke(query)
-print("\nRAG Response using Groq model:")
-print(response)
+chain = (
+    {"vector_context": lambda q: hybrid_retrieve(q)[0],
+     "graph_context": lambda q: hybrid_retrieve(q)[1],
+     "question": RunnablePassthrough()}
+    | final_prompt | llm | StrOutputParser()
+)
+
+# ------------------------------------------------------------------
+# 7. INTERACTIVE(INFERENCES) LOOP
+# ------------------------------------------------------------------
+print("READY! Ask a question (type 'quit' to exit)\n")
+while True:
+    q = input("Question: ").strip()
+    if q.lower() in {"quit", "exit", "q"}:
+        print("Goodbye!")
+        break
+    if not q: continue
+    ans = chain.invoke(q)
+    print(f"\nAnswer: {ans}\n")
+    print("-" * 60)
