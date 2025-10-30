@@ -82,3 +82,14 @@ NEO4J_PASSWORD → from your Neo4j Aura dashboar
 ### Expected Output
 
 Text ingested into Neo4j with embeddings successfully!
+
+## Quick Test Results
+
+<img width="1807" height="237" alt="image" src="https://github.com/user-attachments/assets/cf5742a4-c5a3-4335-ba41-e902a233367a" />
+
+<img width="1688" height="682" alt="image" src="https://github.com/user-attachments/assets/8719b74e-a02c-4888-bda9-e2d5fac13d24" />
+
+
+<img width="1512" height="228" alt="image" src="https://github.com/user-attachments/assets/332e28c0-7637-4f31-b5e6-aa991bf60152" />
+
+
