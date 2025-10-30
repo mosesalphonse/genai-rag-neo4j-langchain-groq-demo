@@ -43,6 +43,7 @@ You can run this on:
 ## 🧱 Prerequisites
 
 ### 1. Environment
+---
 You can run this project on:
 - 🟢 **Google Colab (Recommended)** — easiest way to try.  
 - 💻 **Local Python 3.10+ environment** with pip.
@@ -61,10 +62,12 @@ Go to [https://colab.research.google.com/](https://colab.research.google.com/).
 
 ### 📦 2. Clone the Repository
 In a new Colab cell, run:
-```python
+```
+python
 !git clone https://github.com/<your-username>/genai-rag-neo4j-langchain-groq-demo.git
 %cd genai-rag-neo4j-langchain-groq-demo
 
+```
 
 ### Enter Required Credentials
 
