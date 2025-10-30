@@ -54,6 +54,12 @@
    - Wait until you see messages: “Vectors stored”, “X relationships stored”  
    - Ask questions!
 
+```
+git clone https://github.com/mosesalphonse/genai-rag-neo4j-langchain-groq-demo.git
+cd genai-rag-neo4j-langchain-groq-demo
+python rag_demo.py
+```
+
 ## Architecture
 
 ```mermaid
