@@ -54,11 +54,8 @@
    - Wait until you see messages: “Vectors stored”, “X relationships stored”  
    - Ask questions!
 
-```
-git clone https://github.com/mosesalphonse/genai-rag-neo4j-langchain-groq-demo.git
-cd genai-rag-neo4j-langchain-groq-demo
-python rag_demo.py
-```
+### Note
+   - After logging into Google Colab (Jupyter Notebook), copy the command from rag_demo.py and execute it. When prompted, enter the necessary values as instructed.
 
 ## Architecture
 
