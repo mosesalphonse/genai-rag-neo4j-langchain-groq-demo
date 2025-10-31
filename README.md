@@ -9,16 +9,17 @@
 [![Groq](https://img.shields.io/badge/Groq-Llama%203.3%2070B-yellow)](https://console.groq.com)
 
 > **Guarantees**  
-> - Plain text **is stored** (not just embeddings)  
-> - **Relationships always created** (LLM + fallback)  
-> - Works with **PDF, DOCX, TXT, MD**  
-> - Answers in **clean, plain English**
+> - Embeddings and its text chunks **are stored** (not just embeddings)  
+> - **Nodes and its Relationships always created for unstructured data well** (LLM + fallback)  
+> - Works with **PDF, DOCX, TXT**  
+> - User can Questions and get Answers in **clean, plain English**
 
 ---
 
 ## Features
-- File upload: `.pdf`, `.docx`, `.txt`, `.md`
-- Stores **text + embeddings** in Neo4j
+- File upload: `.pdf`, `.docx`, `.txt`
+- Stores **text + embeddings along with nodes and its relationships** in Neo4j
+- Knowledge Graph for Enhanced Contextual Accuracy 
 - Extracts **entities & relationships** (LLM + fallback)
 - Semantic search via vector index
 - Fast answers with **Groq Llama 3.3 70B**
@@ -70,3 +71,14 @@ graph TD
     F --> H["Store Entities\n:Entity {name}"]
     F --> I["Store Relationships\n-[:REL]->"]
     E & H & I --> J[Ready for Inference]
+
+```
+### Data Inferance Flow 
+
+```mermaid
+graph TD
+    A["When the prompt opens"] --> B[Text Promt Opens]
+    B --> C["Ask any questions in plain English"]
+    C --> D["you may get answer if the questions are relevent to the data in ingested"]
+    D --> E["Get Answer in Plain English"]
+    E --> J[When Done. 'quit' to terminate]
