@@ -8,66 +8,65 @@
 [![Neo4j](https://img.shields.io/badge/Neo4j-AuraDB-green)](https://neo4j.com/cloud/aura/)
 [![Groq](https://img.shields.io/badge/Groq-Llama%203.3%2070B-yellow)](https://console.groq.com)
 
-> **Guarantees**:
-> - Plain text **is stored** (not just embeddings)
-> - **Relationships are always created** (LLM + fallback)
-> - Works with **PDF, DOCX, TXT, MD**
+> **Guarantees**  
+> - Plain text **is stored** (not just embeddings)  
+> - **Relationships always created** (LLM + fallback)  
+> - Works with **PDF, DOCX, TXT, MD**  
 > - Answers in **clean, plain English**
 
 ---
 
 ## Features
-
-- File upload support: `.pdf`, `.docx`, `.txt`, `.md`
-- Stores **text + embeddings** in Neo4j (`TextChunk` nodes)
-- Extracts **entities & relationships** (LLM + rule-based fallback)
+- File upload: `.pdf`, `.docx`, `.txt`, `.md`
+- Stores **text + embeddings** in Neo4j
+- Extracts **entities & relationships** (LLM + fallback)
 - Semantic search via vector index
-- Fast reasoning with **Groq Llama 3.3 70B**
-- Runs in **Google Colab** or **locally**
+- Fast answers with **Groq Llama 3.3 70B**
+- Runs in **Colab** or **locally**
 
 ---
 
 ## Prerequisites
 
-| Requirement         | How to Get                                      |
-|---------------------|-------------------------------------------------|
-| Groq API Key        | [https://console.groq.com](https://console.groq.com) → Free tier available |
-| Neo4j AuraDB        | [https://console.neo4j.io](https://console.neo4j.io) → Free cloud instance |
-| Python 3.10+        | Local install or use Google Colab               |
+| Requirement       | How to Get |
+|-------------------|------------|
+| **Groq API Key**  | [console.groq.com](https://console.groq.com) |
+| **Neo4j AuraDB**  | [console.neo4j.io](https://console.neo4j.io) |
+| **Python 3.10+**  | Local or Colab |
 
-**Note:** No GPU needed — runs on CPU in Colab.
+> No GPU needed.
 
-## Run in Google Colab (Recommended)
+---
 
-1. **Open in Colab**  
-   Click the badge:  
-   ![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)
+## Run in Google Colab
 
-2. **Run All Cells**  
-   - Run the setup cell → installs required packages  
-   - Enter credentials when prompted:  
-     - Groq API key  
-     - Neo4j URI: `neo4j+s://<your-id>.databases.neo4j.io`  
-     - Neo4j Username: `neo4j`  
-     - Neo4j Password  
-   - Upload your file → Click “Choose Files”  
-   - Wait until you see messages: “Vectors stored”, “X relationships stored”  
-   - Ask questions!
+1. Click:  
+   [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/<your-username>/genai-rag-neo4j-langchain-groq-demo/blob/main/rag_demo.ipynb)
 
-### Note
-   - After logging into Google Colab (Jupyter Notebook), copy the command from rag_demo.py and execute it. When prompted, enter the necessary values as instructed.
+2. Run all cells → enter:
+   - `Groq API key`
+   - `Neo4j URI` (`neo4j+s://<id>.databases.neo4j.io`)
+   - `Username`: `neo4j`
+   - `Password`
+3. Upload file → **Choose Files**
+4. Wait for: `Vectors stored`, `X relationships stored`
+5. Start asking questions!
+
+> **Tip:** The graph persists in Neo4j — close and reopen later.
+
+---
 
 ## Architecture
 
+### Data Ingestion Flow
 ```mermaid
 graph TD
-    A[Upload File] --> B[Extract Text]
-    B --> C[Chunk Text]
-    C --> D[Store in Neo4j]
-    D --> E[Vector Index]
-    D --> F[Entity + Relationship Extraction]
-    E --> G[Semantic Search]
-    F --> H[Knowledge Graph]
-    G & H --> I[Hybrid RAG]
-    I --> J[Plain English Answer]
-
+    A["Upload File\nPDF, DOCX, TXT, MD"] --> B[Extract Text]
+    B --> C["Chunk Text\n500 chars, 100 overlap"]
+    C --> D[Neo4j DB]
+    D --> E["Vector Index\nTextChunk + Embedding"]
+    C --> F["LLM Extract\nEntities & Relationships"]
+    F --> G[Rule-based Fallback]
+    F --> H["Store Entities\n:Entity {name}"]
+    F --> I["Store Relationships\n-[:REL]->"]
+    E & H & I --> J[Ready for Inference]
